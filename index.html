@@ -1,0 +1,440 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { ChevronRight, ChevronDown, Package, AlertTriangle, Settings, RefreshCw, Calculator, FileJson, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+
+// --- DATA & CONFIGURATION ---
+
+// Hard stops from your Python code
+const RAW_STOPS = new Set([
+  "Desc_OreIron_C",
+  "Desc_OreCopper_C",
+  "Desc_Stone_C",      // Limestone
+  "Desc_Coal_C",
+  "Desc_RawQuartz_C",
+  "Desc_Sulfur_C",
+  "Desc_LiquidOil_C",
+  "Desc_Water_C",
+  "Desc_SAM_C",
+  "Desc_OreGold_C"     // Caterium
+]);
+
+// Extended Mock Data (Default fallback if fetch fails)
+const DEFAULT_RECIPE_DATA = {
+  // --- BASICS ---
+  "Recipe_IngotIron_C": [{
+    "className": "Recipe_IngotIron_C",
+    "name": "Iron Ingot",
+    "duration": 2,
+    "ingredients": [{ "item": "Desc_OreIron_C", "amount": 1 }],
+    "products": [{ "item": "Desc_IronIngot_C", "amount": 1 }],
+    "alternate": false
+  }],
+  "Recipe_IngotCopper_C": [{
+    "className": "Recipe_IngotCopper_C",
+    "name": "Copper Ingot",
+    "duration": 2,
+    "ingredients": [{ "item": "Desc_OreCopper_C", "amount": 1 }],
+    "products": [{ "item": "Desc_CopperIngot_C", "amount": 1 }],
+    "alternate": false
+  }],
+  "Recipe_Wire_C": [{
+    "className": "Recipe_Wire_C",
+    "name": "Wire",
+    "duration": 4,
+    "ingredients": [{ "item": "Desc_CopperIngot_C", "amount": 1 }],
+    "products": [{ "item": "Desc_Wire_C", "amount": 2 }],
+    "alternate": false
+  }],
+  "Recipe_Cable_C": [{
+    "className": "Recipe_Cable_C",
+    "name": "Cable",
+    "duration": 2,
+    "ingredients": [{ "item": "Desc_Wire_C", "amount": 2 }],
+    "products": [{ "item": "Desc_Cable_C", "amount": 1 }],
+    "alternate": false
+  }],
+  "Recipe_IronPlate_C": [{
+    "className": "Recipe_IronPlate_C",
+    "name": "Iron Plate",
+    "duration": 6,
+    "ingredients": [{ "item": "Desc_IronIngot_C", "amount": 3 }],
+    "products": [{ "item": "Desc_IronPlate_C", "amount": 2 }],
+    "alternate": false
+  }],
+  "Recipe_IronRod_C": [{
+    "className": "Recipe_IronRod_C",
+    "name": "Iron Rod",
+    "duration": 4,
+    "ingredients": [{ "item": "Desc_IronIngot_C", "amount": 1 }],
+    "products": [{ "item": "Desc_IronRod_C", "amount": 1 }],
+    "alternate": false
+  }]
+};
+
+// --- LOGIC HELPERS ---
+
+// Helper to clean IDs into friendly names if 'name' property is missing
+const cleanName = (id) => id.replace("Desc_", "").replace("_C", "").replace(/([A-Z])/g, ' $1').trim();
+
+// Recursively build the tree data
+const calculateNode = (itemId, requiredRate, visited, productToRecipe, idToName) => {
+  const itemName = idToName[itemId] || cleanName(itemId);
+  
+  // 1. Check Hard Stops
+  if (RAW_STOPS.has(itemId)) {
+    return {
+      id: itemId,
+      name: itemName,
+      rate: requiredRate,
+      type: 'raw',
+      children: []
+    };
+  }
+
+  // 2. Check Loop
+  if (visited.has(itemId)) {
+    return {
+      id: itemId,
+      name: itemName,
+      rate: requiredRate,
+      type: 'loop',
+      children: []
+    };
+  }
+
+  // 3. Find Recipe
+  const recipe = productToRecipe[itemId];
+  if (!recipe) {
+    // Treat as raw material if no recipe found
+    return {
+      id: itemId,
+      name: itemName,
+      rate: requiredRate,
+      type: 'raw', // Or 'missing'
+      children: []
+    };
+  }
+
+  const newVisited = new Set(visited);
+  newVisited.add(itemId);
+
+  // Calculate Scale
+  // rate = (amount / duration) * 60
+  const productEntry = recipe.products.find(p => p.item === itemId);
+  const baseRate = (productEntry.amount / recipe.duration) * 60;
+  const scale = requiredRate / baseRate;
+
+  // Build Children
+  const children = recipe.ingredients.map(ing => {
+    const ingRate = (ing.amount / recipe.duration) * 60 * scale;
+    return calculateNode(ing.item, ingRate, newVisited, productToRecipe, idToName);
+  });
+
+  return {
+    id: itemId,
+    name: itemName, // Use recipe name if available, otherwise item name
+    rate: requiredRate,
+    type: 'normal',
+    recipeName: recipe.name,
+    children: children
+  };
+};
+
+// --- COMPONENTS ---
+
+const TreeNode = ({ node, depth = 0 }) => {
+  const isLeaf = node.children.length === 0;
+  
+  // Color coding based on type
+  let rateColor = "text-orange-400";
+  let bgColor = "bg-gray-800/50";
+  let borderColor = "border-l-gray-600";
+  
+  if (node.type === 'raw') {
+    rateColor = "text-red-400";
+    bgColor = "bg-red-900/10";
+    borderColor = "border-l-red-500/50";
+  } else if (node.type === 'loop') {
+    rateColor = "text-yellow-400";
+    bgColor = "bg-yellow-900/10";
+    borderColor = "border-l-yellow-500/50";
+  }
+
+  return (
+    <div className={`ml-4 pl-4 border-l ${borderColor} mt-1`}>
+      <details open className="group">
+        <summary className={`flex items-center p-2 rounded cursor-pointer hover:bg-gray-700 transition-colors list-none ${bgColor}`}>
+          <div className="flex items-center gap-2 flex-1">
+            {!isLeaf ? (
+              <ChevronRight className="w-4 h-4 text-gray-500 group-open:rotate-90 transition-transform" />
+            ) : (
+              <div className="w-4" /> // Spacer
+            )}
+            
+            <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2">
+              <span className={`font-mono font-bold ${rateColor}`}>
+                {node.rate.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 })}/min
+              </span>
+              <span className="font-semibold text-gray-200">
+                {node.name}
+              </span>
+            </div>
+
+            {node.type === 'raw' && (
+              <span className="ml-auto text-xs bg-red-900/50 text-red-300 px-2 py-0.5 rounded border border-red-800">RAW</span>
+            )}
+            {node.type === 'loop' && (
+              <span className="ml-auto text-xs bg-yellow-900/50 text-yellow-300 px-2 py-0.5 rounded border border-yellow-800">LOOP</span>
+            )}
+          </div>
+        </summary>
+        
+        {node.children.length > 0 && (
+          <div className="pt-1">
+            {node.children.map((child, idx) => (
+              <TreeNode key={`${child.id}-${idx}`} node={child} depth={depth + 1} />
+            ))}
+          </div>
+        )}
+      </details>
+    </div>
+  );
+};
+
+const App = () => {
+  const [targetItem, setTargetItem] = useState('');
+  const [targetRate, setTargetRate] = useState(60);
+  const [treeData, setTreeData] = useState(null);
+  const [items, setItems] = useState([]);
+  const [loadedData, setLoadedData] = useState(DEFAULT_RECIPE_DATA);
+  const [dataStatus, setDataStatus] = useState('loading'); // 'loading' | 'success' | 'error'
+  
+  // --- FETCH DATA ON MOUNT ---
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const response = await fetch('./recipes.json');
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const json = await response.json();
+        setLoadedData(json);
+        setDataStatus('success');
+      } catch (e) {
+        console.warn("Could not load local recipes.json, falling back to default data.", e);
+        setDataStatus('error'); // Error here means "Using fallback data"
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  // Data Maps
+  const { productToRecipe, nameToId, idToName } = useMemo(() => {
+    const prodMap = {};
+    const nToId = {};
+    const idToN = {};
+
+    Object.values(loadedData).forEach(recipeList => {
+      recipeList.forEach(recipe => {
+        if (recipe.alternate) return; // Skip alternates for now
+
+        if (recipe.products && recipe.products.length > 0) {
+          const itemId = recipe.products[0].item;
+          
+          if (!prodMap[itemId]) {
+            prodMap[itemId] = recipe;
+          }
+
+          const friendlyName = recipe.name || cleanName(itemId);
+          nToId[friendlyName] = itemId;
+          idToN[itemId] = friendlyName;
+
+          // Map ingredients to names too
+          recipe.ingredients.forEach(ing => {
+            if (!idToN[ing.item]) {
+              idToN[ing.item] = cleanName(ing.item);
+            }
+          });
+        }
+      });
+    });
+    return { productToRecipe: prodMap, nameToId: nToId, idToName: idToN };
+  }, [loadedData]);
+
+  // Initialize Items List
+  useEffect(() => {
+    const sortedNames = Object.keys(nameToId).sort();
+    setItems(sortedNames);
+    
+    // Attempt to preserve selection if it still exists in new data, otherwise reset
+    if (!targetItem || !nameToId[targetItem]) {
+      if (sortedNames.length > 0) {
+        if (sortedNames.includes("Iron Plate")) setTargetItem("Iron Plate");
+        else setTargetItem(sortedNames[0]);
+      } else {
+        setTargetItem('');
+      }
+    }
+  }, [nameToId]);
+
+  const handleCalculate = (e) => {
+    e.preventDefault();
+    if (!targetItem || !nameToId[targetItem]) return;
+
+    const itemId = nameToId[targetItem];
+    const tree = calculateNode(itemId, parseFloat(targetRate), new Set(), productToRecipe, idToName);
+    setTreeData(tree);
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-900 text-gray-100 font-sans selection:bg-orange-500 selection:text-white pb-20">
+      
+      {/* Header */}
+      <header className="bg-gray-800 border-b border-gray-700 p-6 shadow-lg">
+        <div className="max-w-4xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="bg-orange-500 p-2 rounded-lg text-gray-900">
+              <Calculator size={24} strokeWidth={2.5} />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-white">
+                Satisfactory <span className="text-orange-500">Calculator</span>
+              </h1>
+              <p className="text-gray-400 text-sm">Production chain visualizer</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+             {dataStatus === 'loading' && (
+                 <div className="flex items-center gap-2 text-yellow-400 bg-yellow-900/30 px-3 py-2 rounded-lg border border-yellow-800">
+                     <Loader2 size={18} className="animate-spin" />
+                     <span className="text-sm font-medium">Fetching recipes.json...</span>
+                 </div>
+             )}
+             
+             {dataStatus === 'success' && (
+                 <div className="flex items-center gap-2 text-green-400 bg-green-900/30 px-3 py-2 rounded-lg border border-green-800">
+                     <CheckCircle size={18} />
+                     <span className="text-sm font-medium">Remote Data Loaded</span>
+                 </div>
+             )}
+
+             {dataStatus === 'error' && (
+                 <div className="flex items-center gap-2 text-gray-400 bg-gray-800 px-3 py-2 rounded-lg border border-gray-700" title="Could not find recipes.json, using fallback data.">
+                     <XCircle size={18} />
+                     <span className="text-sm font-medium">Using Default Data</span>
+                 </div>
+             )}
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-4xl mx-auto p-6 space-y-8">
+        
+        {/* Input Card */}
+        <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-xl">
+          <form onSubmit={handleCalculate} className="flex flex-col md:flex-row gap-6 items-end">
+            
+            {/* Item Select */}
+            <div className="flex-1 w-full">
+              <label className="block text-xs font-semibold text-gray-400 uppercase mb-2 tracking-wider">
+                Target Product
+              </label>
+              <div className="relative">
+                <select 
+                  value={targetItem}
+                  onChange={(e) => setTargetItem(e.target.value)}
+                  className="w-full bg-gray-900 border border-gray-600 rounded-lg py-3 px-4 text-white appearance-none focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all cursor-pointer"
+                >
+                  {items.length === 0 ? (
+                      <option>No items found</option>
+                  ) : (
+                    items.map(name => (
+                        <option key={name} value={name}>{name}</option>
+                    ))
+                  )}
+                </select>
+                <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" size={16} />
+              </div>
+            </div>
+
+            {/* Rate Input */}
+            <div className="w-full md:w-48">
+              <label className="block text-xs font-semibold text-gray-400 uppercase mb-2 tracking-wider">
+                Rate (per min)
+              </label>
+              <input 
+                type="number" 
+                value={targetRate}
+                onChange={(e) => setTargetRate(e.target.value)}
+                step="0.1"
+                min="0"
+                className="w-full bg-gray-900 border border-gray-600 rounded-lg py-3 px-4 text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all font-mono"
+              />
+            </div>
+
+            {/* Action Button */}
+            <button 
+              type="submit"
+              className="w-full md:w-auto bg-orange-600 hover:bg-orange-500 text-white font-bold py-3 px-8 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-lg shadow-orange-900/20"
+            >
+              <RefreshCw size={18} />
+              Calculate
+            </button>
+          </form>
+        </div>
+
+        {/* Results Area */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 text-gray-400 border-b border-gray-700 pb-2">
+            <Package size={18} />
+            <span className="text-sm font-medium uppercase tracking-widest">Production Stack</span>
+          </div>
+
+          {!treeData && (
+            <div className="text-center py-20 border-2 border-dashed border-gray-800 rounded-xl">
+              <Settings className="mx-auto text-gray-700 mb-4 animate-spin-slow" size={48} />
+              <p className="text-gray-500">Select an item and hit Calculate to generate the tree.</p>
+              {dataStatus === 'error' && (
+                  <p className="text-orange-500 text-sm mt-2 font-medium">Note: Using default data. Ensure recipes.json is in the same folder as index.html.</p>
+              )}
+            </div>
+          )}
+
+          {treeData && (
+            <div className="bg-gray-900 rounded-xl overflow-hidden">
+               {/* Root Node Container - slightly modified style for the top level */}
+               <div className="p-2">
+                 <div className="flex items-center gap-2 p-3 bg-gray-800 rounded-lg border-l-4 border-orange-500 mb-4">
+                    <span className="font-mono text-xl font-bold text-orange-400">
+                        {treeData.rate.toLocaleString()}/min
+                    </span>
+                    <span className="text-lg font-bold text-white">
+                        {treeData.name}
+                    </span>
+                 </div>
+                 
+                 {/* Recursive Children */}
+                 <div className="pr-4">
+                    {treeData.children.length > 0 ? (
+                        treeData.children.map((child, idx) => (
+                            <TreeNode key={`${child.id}-${idx}`} node={child} />
+                        ))
+                    ) : (
+                        <div className="ml-4 flex items-center gap-2 text-red-400 py-2">
+                             <AlertTriangle size={16} />
+                             <span>No ingredients or Raw Material.</span>
+                        </div>
+                    )}
+                 </div>
+               </div>
+            </div>
+          )}
+        </div>
+
+      </main>
+    </div>
+  );
+};
+
+export default App;
