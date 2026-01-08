@@ -13,7 +13,7 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
     <style>
-        /* Custom animation for the loader */
+        /* Custom animation for the slow spinner */
         @keyframes spin-slow {
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
@@ -29,10 +29,11 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
-        // --- ICONS (Replaced imports with direct SVG components for browser compatibility) ---
+        // --- ICONS (Converted to SVG components) ---
         const IconBase = ({ children, size = 24, className = "" }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>
         );
+        
         const ChevronRight = (p) => <IconBase {...p}><path d="m9 18 6-6-6-6"/></IconBase>;
         const ChevronDown = (p) => <IconBase {...p}><path d="m6 9 6 6 6-6"/></IconBase>;
         const Package = (p) => <IconBase {...p}><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22v-9"/></IconBase>;
@@ -43,6 +44,9 @@
         const CheckCircle = (p) => <IconBase {...p}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></IconBase>;
         const XCircle = (p) => <IconBase {...p}><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></IconBase>;
         const Loader2 = (p) => <IconBase {...p} className={`${p.className} animate-spin`}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></IconBase>;
+        // Added the Layers icon for the Raw Materials section
+        const Layers = (p) => <IconBase {...p}><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></IconBase>;
+
 
         // --- DATA & CONFIGURATION ---
 
@@ -179,7 +183,7 @@
                                 {!isLeaf ? (
                                     <ChevronRight className="w-4 h-4 text-gray-500 group-open:rotate-90 transition-transform" />
                                 ) : (
-                                    <div className="w-4" />
+                                    <div className="w-4" /> 
                                 )}
                                 
                                 <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2">
@@ -231,7 +235,7 @@
                         setLoadedData(json);
                         setDataStatus('success');
                     } catch (e) {
-                        console.warn("Could not load local recipes.json, falling back to default data.");
+                        console.warn("Could not load local recipes.json, falling back to default data.", e);
                         setDataStatus('error'); 
                     }
                 };
@@ -293,13 +297,37 @@
                 setTreeData(tree);
             };
 
+            // --- Calculate Total Raw Materials ---
+            const rawTotals = useMemo(() => {
+                if (!treeData) return null;
+
+                const totals = {};
+
+                const traverse = (node) => {
+                    if (node.type === 'raw') {
+                        if (!totals[node.id]) {
+                            totals[node.id] = { name: node.name, rate: 0 };
+                        }
+                        totals[node.id].rate += node.rate;
+                    }
+                    
+                    if (node.children && node.children.length > 0) {
+                        node.children.forEach(traverse);
+                    }
+                };
+
+                traverse(treeData);
+
+                return Object.values(totals).sort((a, b) => b.rate - a.rate);
+            }, [treeData]);
+
             return (
                 <div className="min-h-screen bg-gray-900 text-gray-100 font-sans selection:bg-orange-500 selection:text-white pb-20">
                     <header className="bg-gray-800 border-b border-gray-700 p-6 shadow-lg">
                         <div className="max-w-4xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
                             <div className="flex items-center gap-3">
                                 <div className="bg-orange-500 p-2 rounded-lg text-gray-900">
-                                    <Calculator size={24} />
+                                    <Calculator size={24} strokeWidth={2.5} />
                                 </div>
                                 <div>
                                     <h1 className="text-2xl font-bold tracking-tight text-white">
@@ -335,6 +363,8 @@
                     </header>
 
                     <main className="max-w-4xl mx-auto p-6 space-y-8">
+                        
+                        {/* Input Card */}
                         <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-xl">
                             <form onSubmit={handleCalculate} className="flex flex-col md:flex-row gap-6 items-end">
                                 <div className="flex-1 w-full">
@@ -383,6 +413,27 @@
                             </form>
                         </div>
 
+                        {/* --- Raw Material Totals --- */}
+                        {rawTotals && rawTotals.length > 0 && (
+                            <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-xl">
+                                <div className="flex items-center gap-2 text-orange-400 mb-4 border-b border-gray-700 pb-2">
+                                    <Layers size={20} />
+                                    <h2 className="text-lg font-bold uppercase tracking-wide">Total Raw Resources</h2>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                                    {rawTotals.map(item => (
+                                        <div key={item.name} className="flex justify-between items-center bg-gray-900/50 p-3 rounded border border-gray-700 hover:border-orange-500/50 transition-colors">
+                                            <span className="text-gray-300 font-medium text-sm">{item.name}</span>
+                                            <span className="text-orange-400 font-mono font-bold">
+                                                {item.rate.toLocaleString(undefined, { maximumFractionDigits: 2 })}<span className="text-xs text-gray-500 ml-1">/min</span>
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Results Area */}
                         <div className="space-y-4">
                             <div className="flex items-center gap-2 text-gray-400 border-b border-gray-700 pb-2">
                                 <Package size={18} />
@@ -427,6 +478,7 @@
                                 </div>
                             )}
                         </div>
+
                     </main>
                 </div>
             );
