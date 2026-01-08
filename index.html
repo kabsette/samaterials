@@ -30,8 +30,8 @@
         const { useState, useEffect, useMemo } = React;
 
         // --- ICONS (Converted to SVG components) ---
-        const IconBase = ({ children, size = 24, className = "" }) => (
-            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>
+        const IconBase = ({ children, size = 24, className = "", fill = "none" }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>
         );
         
         const ChevronRight = (p) => <IconBase {...p}><path d="m9 18 6-6-6-6"/></IconBase>;
@@ -44,8 +44,8 @@
         const CheckCircle = (p) => <IconBase {...p}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></IconBase>;
         const XCircle = (p) => <IconBase {...p}><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></IconBase>;
         const Loader2 = (p) => <IconBase {...p} className={`${p.className} animate-spin`}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></IconBase>;
-        // Added the Layers icon for the Raw Materials section
         const Layers = (p) => <IconBase {...p}><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></IconBase>;
+        const Zap = (p) => <IconBase {...p}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></IconBase>;
 
 
         // --- DATA & CONFIGURATION ---
@@ -65,6 +65,24 @@
             "Desc_OreGold_C"    
         ]);
 
+        const BUILDING_POWER = {
+            "Desc_OilPump_C": 40,
+            "Desc_FrackingSmasher_C": 150, // Resource Well Pressurizer
+            "Desc_WaterPump_C": 20,
+            "Desc_MinerMk1_C": 5,
+            "Desc_MinerMk2_C": 12,
+            "Desc_MinerMk3_C": 30,
+            "Desc_FoundryMk1_C": 16,
+            "Desc_SmelterMk1_C": 4,
+            "Desc_AssemblerMk1_C": 15,
+            "Desc_ManufacturerMk1_C": 55,
+            "Desc_Blender_C": 75,
+            "Desc_Packager_C": 10,
+            "Desc_HadronCollider_C": 1500, // Particle Accelerator
+            "Desc_ConstructorMk1_C": 4,
+            "Desc_OilRefinery_C": 30
+        };
+
         const DEFAULT_RECIPE_DATA = {
             "Recipe_IngotIron_C": [{
                 "className": "Recipe_IngotIron_C",
@@ -72,6 +90,7 @@
                 "duration": 2,
                 "ingredients": [{ "item": "Desc_OreIron_C", "amount": 1 }],
                 "products": [{ "item": "Desc_IronIngot_C", "amount": 1 }],
+                "producedIn": ["Desc_SmelterMk1_C"],
                 "alternate": false
             }],
             "Recipe_IngotCopper_C": [{
@@ -80,6 +99,7 @@
                 "duration": 2,
                 "ingredients": [{ "item": "Desc_OreCopper_C", "amount": 1 }],
                 "products": [{ "item": "Desc_CopperIngot_C", "amount": 1 }],
+                "producedIn": ["Desc_SmelterMk1_C"],
                 "alternate": false
             }],
             "Recipe_Wire_C": [{
@@ -88,6 +108,7 @@
                 "duration": 4,
                 "ingredients": [{ "item": "Desc_CopperIngot_C", "amount": 1 }],
                 "products": [{ "item": "Desc_Wire_C", "amount": 2 }],
+                "producedIn": ["Desc_ConstructorMk1_C"],
                 "alternate": false
             }],
             "Recipe_Cable_C": [{
@@ -96,6 +117,7 @@
                 "duration": 2,
                 "ingredients": [{ "item": "Desc_Wire_C", "amount": 2 }],
                 "products": [{ "item": "Desc_Cable_C", "amount": 1 }],
+                "producedIn": ["Desc_ConstructorMk1_C"],
                 "alternate": false
             }],
             "Recipe_IronPlate_C": [{
@@ -104,6 +126,7 @@
                 "duration": 6,
                 "ingredients": [{ "item": "Desc_IronIngot_C", "amount": 3 }],
                 "products": [{ "item": "Desc_IronPlate_C", "amount": 2 }],
+                "producedIn": ["Desc_ConstructorMk1_C"],
                 "alternate": false
             }],
             "Recipe_IronRod_C": [{
@@ -112,6 +135,7 @@
                 "duration": 4,
                 "ingredients": [{ "item": "Desc_IronIngot_C", "amount": 1 }],
                 "products": [{ "item": "Desc_IronRod_C", "amount": 1 }],
+                "producedIn": ["Desc_ConstructorMk1_C"],
                 "alternate": false
             }]
         };
@@ -123,26 +147,64 @@
         const calculateNode = (itemId, requiredRate, visited, productToRecipe, idToName) => {
             const itemName = idToName[itemId] || cleanName(itemId);
             
+            // 1. Check Hard Stops
             if (RAW_STOPS.has(itemId)) {
-                return { id: itemId, name: itemName, rate: requiredRate, type: 'raw', children: [] };
+                return {
+                    id: itemId,
+                    name: itemName,
+                    rate: requiredRate,
+                    type: 'raw',
+                    power: 0,
+                    machineCount: 0,
+                    children: []
+                };
             }
 
+            // 2. Check Loop
             if (visited.has(itemId)) {
-                return { id: itemId, name: itemName, rate: requiredRate, type: 'loop', children: [] };
+                return {
+                    id: itemId,
+                    name: itemName,
+                    rate: requiredRate,
+                    type: 'loop',
+                    power: 0,
+                    machineCount: 0,
+                    children: []
+                };
             }
 
+            // 3. Find Recipe
             const recipe = productToRecipe[itemId];
             if (!recipe) {
-                return { id: itemId, name: itemName, rate: requiredRate, type: 'raw', children: [] };
+                return {
+                    id: itemId,
+                    name: itemName,
+                    rate: requiredRate,
+                    type: 'raw', // Or 'missing'
+                    power: 0,
+                    machineCount: 0,
+                    children: []
+                };
             }
 
             const newVisited = new Set(visited);
             newVisited.add(itemId);
 
+            // Calculate Scale & Power
             const productEntry = recipe.products.find(p => p.item === itemId);
             const baseRate = (productEntry.amount / recipe.duration) * 60;
-            const scale = requiredRate / baseRate;
+            const scale = requiredRate / baseRate; // Exact machines needed
+            
+            let stepPower = 0;
+            let machineId = null;
 
+            if (recipe.producedIn && recipe.producedIn.length > 0) {
+                machineId = recipe.producedIn[0]; // Default to first machine
+                const basePower = BUILDING_POWER[machineId] || 0;
+                stepPower = scale * basePower;
+            }
+
+            // Build Children
             const children = recipe.ingredients.map(ing => {
                 const ingRate = (ing.amount / recipe.duration) * 60 * scale;
                 return calculateNode(ing.item, ingRate, newVisited, productToRecipe, idToName);
@@ -150,10 +212,12 @@
 
             return {
                 id: itemId,
-                name: itemName,
+                name: itemName, 
                 rate: requiredRate,
                 type: 'normal',
                 recipeName: recipe.name,
+                power: stepPower,
+                machineCount: scale,
                 children: children
             };
         };
@@ -181,14 +245,14 @@
                 <div className={`ml-4 pl-4 border-l ${borderColor} mt-1`}>
                     <details open className="group">
                         <summary className={`flex items-center p-2 rounded cursor-pointer hover:bg-gray-700 transition-colors list-none ${bgColor}`}>
-                            <div className="flex items-center gap-2 flex-1">
+                            <div className="flex items-center gap-2 flex-1 flex-wrap">
                                 {!isLeaf ? (
                                     <ChevronRight className="w-4 h-4 text-gray-500 group-open:rotate-90 transition-transform" />
                                 ) : (
                                     <div className="w-4" /> 
                                 )}
                                 
-                                <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2">
+                                <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2 mr-auto">
                                     <span className={`font-mono font-bold ${rateColor}`}>
                                         {node.rate.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 })}/min
                                     </span>
@@ -196,12 +260,30 @@
                                         {node.name}
                                     </span>
                                 </div>
+                                
+                                {/* Stats Area */}
+                                <div className="flex items-center gap-3 text-xs sm:text-sm">
+                                    {/* Machine Count Display */}
+                                    {node.type === 'normal' && node.machineCount > 0 && (
+                                        <span className="text-gray-400 bg-gray-900/50 px-2 py-0.5 rounded font-mono">
+                                            {node.machineCount.toFixed(2)}x Mch
+                                        </span>
+                                    )}
+
+                                    {/* Power Display */}
+                                    {node.power > 0 && (
+                                        <div className="flex items-center gap-1 text-yellow-500 bg-yellow-900/20 px-2 py-0.5 rounded border border-yellow-800/30">
+                                            <Zap size={12} fill="currentColor" />
+                                            <span className="font-mono font-bold">{node.power.toLocaleString(undefined, { maximumFractionDigits: 1 })} MW</span>
+                                        </div>
+                                    )}
+                                </div>
 
                                 {node.type === 'raw' && (
-                                    <span className="ml-auto text-xs bg-red-900/50 text-red-300 px-2 py-0.5 rounded border border-red-800">RAW</span>
+                                    <span className="ml-2 text-xs bg-red-900/50 text-red-300 px-2 py-0.5 rounded border border-red-800">RAW</span>
                                 )}
                                 {node.type === 'loop' && (
-                                    <span className="ml-auto text-xs bg-yellow-900/50 text-yellow-300 px-2 py-0.5 rounded border border-yellow-800">LOOP</span>
+                                    <span className="ml-2 text-xs bg-yellow-900/50 text-yellow-300 px-2 py-0.5 rounded border border-yellow-800">LOOP</span>
                                 )}
                             </div>
                         </summary>
@@ -252,7 +334,7 @@
 
                 Object.values(loadedData).forEach(recipeList => {
                     recipeList.forEach(recipe => {
-                        if (recipe.alternate) return;
+                        if (recipe.alternate) return; 
 
                         if (recipe.products && recipe.products.length > 0) {
                             const itemId = recipe.products[0].item;
@@ -299,16 +381,23 @@
                 setTreeData(tree);
             };
 
-            // --- Calculate Total Raw Materials ---
-            const rawTotals = useMemo(() => {
-                if (!treeData) return null;
+            // --- Calculate Totals (Raw Materials & Power) ---
+            const { rawTotals, totalPower } = useMemo(() => {
+                if (!treeData) return { rawTotals: null, totalPower: 0 };
 
                 const totals = {};
+                let powerSum = 0;
 
                 const traverse = (node) => {
+                    // Sum Power
+                    if (node.power) {
+                        powerSum += node.power;
+                    }
+
+                    // If node is a raw material, add to totals
                     if (node.type === 'raw') {
                         if (!totals[node.id]) {
-                            totals[node.id] = { name: node.name, rate: 0 };
+                        totals[node.id] = { name: node.name, rate: 0 };
                         }
                         totals[node.id].rate += node.rate;
                     }
@@ -320,7 +409,10 @@
 
                 traverse(treeData);
 
-                return Object.values(totals).sort((a, b) => b.rate - a.rate);
+                return { 
+                    rawTotals: Object.values(totals).sort((a, b) => b.rate - a.rate),
+                    totalPower: powerSum
+                };
             }, [treeData]);
 
             return (
@@ -415,24 +507,42 @@
                             </form>
                         </div>
 
-                        {/* --- Raw Material Totals --- */}
-                        {rawTotals && rawTotals.length > 0 && (
-                            <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-xl">
+                        {/* --- Summary: Raw Materials & Power --- */}
+                        {treeData && (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            
+                            {/* Power Summary Card */}
+                            <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-xl flex flex-col justify-center items-center relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-full h-1 bg-yellow-500/50"></div>
+                                <Zap size={32} className="text-yellow-500 mb-2" fill="currentColor" />
+                                <h2 className="text-sm font-bold uppercase text-gray-400 tracking-wider">Total Energy</h2>
+                                <p className="text-3xl font-mono font-bold text-white mt-1">
+                                    {totalPower.toLocaleString(undefined, { maximumFractionDigits: 1 })} <span className="text-base font-normal text-yellow-500">MW</span>
+                                </p>
+                            </div>
+
+                            {/* Raw Materials Card */}
+                            <div className="md:col-span-2 bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-xl">
                                 <div className="flex items-center gap-2 text-orange-400 mb-4 border-b border-gray-700 pb-2">
                                     <Layers size={20} />
                                     <h2 className="text-lg font-bold uppercase tracking-wide">Total Raw Resources</h2>
                                 </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                                    {rawTotals.map(item => (
-                                        <div key={item.name} className="flex justify-between items-center bg-gray-900/50 p-3 rounded border border-gray-700 hover:border-orange-500/50 transition-colors">
-                                            <span className="text-gray-300 font-medium text-sm">{item.name}</span>
-                                            <span className="text-orange-400 font-mono font-bold">
+                                {rawTotals && rawTotals.length > 0 ? (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        {rawTotals.map(item => (
+                                            <div key={item.name} className="flex justify-between items-center bg-gray-900/50 p-3 rounded border border-gray-700 hover:border-orange-500/50 transition-colors">
+                                                <span className="text-gray-300 font-medium text-sm">{item.name}</span>
+                                                <span className="text-orange-400 font-mono font-bold">
                                                 {item.rate.toLocaleString(undefined, { maximumFractionDigits: 2 })}<span className="text-xs text-gray-500 ml-1">/min</span>
-                                            </span>
-                                        </div>
-                                    ))}
-                                </div>
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="text-gray-500 italic text-sm">No raw resources detected.</div>
+                                )}
                             </div>
+                        </div>
                         )}
 
                         {/* Results Area */}
@@ -455,13 +565,21 @@
                             {treeData && (
                                 <div className="bg-gray-900 rounded-xl overflow-hidden">
                                     <div className="p-2">
-                                        <div className="flex items-center gap-2 p-3 bg-gray-800 rounded-lg border-l-4 border-orange-500 mb-4">
-                                            <span className="font-mono text-xl font-bold text-orange-400">
-                                                {treeData.rate.toLocaleString()}/min
-                                            </span>
-                                            <span className="text-lg font-bold text-white">
-                                                {treeData.name}
-                                            </span>
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-gray-800 rounded-lg border-l-4 border-orange-500 mb-4">
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-mono text-xl font-bold text-orange-400">
+                                                    {treeData.rate.toLocaleString()}/min
+                                                </span>
+                                                <span className="text-lg font-bold text-white">
+                                                    {treeData.name}
+                                                </span>
+                                            </div>
+                                            {treeData.power > 0 && (
+                                                <div className="flex items-center gap-1 text-yellow-500 bg-yellow-900/20 px-3 py-1 rounded border border-yellow-800/30 self-start sm:self-auto">
+                                                    <Zap size={16} fill="currentColor" />
+                                                    <span className="font-mono font-bold">{treeData.power.toLocaleString(undefined, { maximumFractionDigits: 1 })} MW</span>
+                                                </div>
+                                            )}
                                         </div>
                                         
                                         <div className="pr-4">
